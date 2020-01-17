@@ -4,8 +4,6 @@ use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
-use chunked_transfer::Decoder as ChunkDecoder;
-
 #[cfg(feature = "tls")]
 use rustls::ClientSession;
 #[cfg(feature = "tls")]
@@ -70,14 +68,6 @@ impl Read for Stream {
             #[cfg(test)]
             Stream::Test(reader, _) => reader.read(buf),
         }
-    }
-}
-
-impl<R> From<ChunkDecoder<R>> for Stream
-where
-    Stream : From<R> {
-    fn from(chunk_decoder: ChunkDecoder<R>) -> Stream {
-        chunk_decoder.into_inner().into()
     }
 }
 

@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::io::{Cursor, Error as IoError, ErrorKind, Read, Result as IoResult};
+use std::rc::Rc;
 use std::str::FromStr;
 
 use chunked_transfer::Decoder as ChunkDecoder;
@@ -304,7 +306,10 @@ impl Response {
         match (use_chunked, limit_bytes) {
             (true, _) => Box::new(PoolReturnRead::new(
                 unit,
-                ChunkDecoder::new(stream),
+                IntoInner::wrap_inner(
+                    stream,
+                    ChunkDecoder::new
+                )
             )) as Box<dyn Read>,
             (false, Some(len)) => Box::new(PoolReturnRead::new(
                 unit,
@@ -541,6 +546,56 @@ fn read_next_line<R: Read>(reader: &mut R) -> IoResult<String> {
         prev_byte_was_cr = byte == b'\r';
 
         buf.push(byte);
+    }
+}
+
+// A simple newtype which adds Read support to an Rc<RefCell<Stream>> by assuming it is
+// ok to exclusively borrow the Stream.
+struct RcReader(Rc<RefCell<Stream>>);
+
+impl Read for RcReader {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        self.0.try_borrow_mut()
+            .expect("RcReader should be the only one mutably borrowing the stream")
+            .read(buf)
+    }
+}
+
+// Implements an "unwrapping" feature. The R field is something which was constructed from
+// an RcReader<W>, and therefore there are two strong Rc references to the W. Using this
+// type's
+struct IntoInner<R> {
+    wrapped: Rc<RefCell<Stream>>,
+    // This reader is expected to also be using the wrapped W somehow.
+    reader: R
+}
+
+impl<R> IntoInner<R> {
+    fn wrap_inner<F: FnOnce(RcReader) -> R>(inner: Stream, constructor: F) -> Self {
+        let wrapped = Rc::new(RefCell::new(inner));
+        let rc_reader = RcReader(wrapped.clone());
+        let reader = constructor(rc_reader);
+        Self {
+            wrapped,
+            reader
+        }
+    }
+}
+
+impl<R> From<IntoInner<R>> for Stream {
+    fn from(into_inner: IntoInner<R>) -> Stream {
+        // Drop the reader so that it no longer has access to its Rc.
+        std::mem::drop(into_inner.reader);
+        Rc::try_unwrap(into_inner.wrapped)
+            .expect("IntoInner failed to unwrap because someone else still had a strong \
+                reference to the wrapping Rc")
+            .into_inner()
+    }
+}
+
+impl<R: Read> Read for IntoInner<R> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        self.reader.read(buf)
     }
 }
 
