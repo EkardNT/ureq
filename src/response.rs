@@ -562,8 +562,7 @@ impl Read for RcReader {
 }
 
 // Implements an "unwrapping" feature. The R field is something which was constructed from
-// an RcReader<W>, and therefore there are two strong Rc references to the W. Using this
-// type's
+// an RcReader<W>, and therefore there are two strong Rc references to the W.
 struct IntoInner<R> {
     wrapped: Rc<RefCell<Stream>>,
     // This reader is expected to also be using the wrapped W somehow.
